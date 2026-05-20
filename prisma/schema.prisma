@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model AccessKey {
+  id        String        @id @default(cuid())
+  label     String
+  keyHash   String        @db.VarChar(255)
+  active    Boolean       @default(true)
+  sessions  ChatSession[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([active])
+}
+
+model ChatSession {
+  id          String        @id @default(cuid())
+  name        String
+  accessKeyId String
+  accessKey   AccessKey     @relation(fields: [accessKeyId], references: [id])
+  users       SessionUser[]
+  messages    Message[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([accessKeyId])
+}
+
+model Account {
+  id           String        @id @default(cuid())
+  username     String        @unique
+  passwordHash String        @db.VarChar(255)
+  displayName  String
+  avatarUrl    String?       @db.VarChar(1000)
+  users        SessionUser[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@map("ChatAccount")
+}
+
+model SessionUser {
+  id          String      @id @default(cuid())
+  sessionId   String
+  session     ChatSession @relation(fields: [sessionId], references: [id])
+  accountId   String?
+  account     Account?    @relation(fields: [accountId], references: [id])
+  displayName String
+  tokenId     String      @unique
+  socketId    String?
+  isAdmin     Boolean     @default(false)
+  lastSeenAt  DateTime    @default(now())
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  messages    Message[]
+
+  @@index([sessionId])
+  @@index([accountId])
+}
+
+model Message {
+  id          String      @id @default(cuid())
+  sessionId   String
+  session     ChatSession @relation(fields: [sessionId], references: [id])
+  senderId    String
+  sender      SessionUser @relation(fields: [senderId], references: [id])
+  senderName  String
+  content     String      @db.VarChar(1000)
+  attachments Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([sessionId, createdAt])
+  @@index([senderId])
+}

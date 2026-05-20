@@ -1,0 +1,2 @@
+ALTER TABLE `ChatAccount` ADD COLUMN `avatarUrl` VARCHAR(1000) NULL;
+ALTER TABLE `Message` ADD COLUMN `attachments` JSON NULL;

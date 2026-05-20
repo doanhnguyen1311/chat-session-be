@@ -1,0 +1,2 @@
+ALTER TABLE `SessionUser`
+  ADD COLUMN `isAdmin` BOOLEAN NOT NULL DEFAULT false;
