@@ -28,7 +28,7 @@ const messageActionSchema = z.object({
 });
 
 const reactionSchema = messageActionSchema.extend({
-  reaction: z.enum(["like", "love", "care", "sad", "angry", "cry", "sick"]).nullable()
+  reaction: z.string().nullable()
 });
 
 const forwardSchema = z.object({
