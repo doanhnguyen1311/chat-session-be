@@ -8,7 +8,7 @@ import { prisma } from "../config/prisma";
 import { authenticateToken, joinChat, resumeChat, verifyAccountToken } from "../modules/auth/auth.service";
 import { joinSchema } from "../modules/auth/auth.schemas";
 import { messageSendSchema } from "../modules/messages/messages.schemas";
-import { createMessage, markMessagesRead } from "../modules/messages/messages.service";
+import { createMessage, getMessage, markMessagesRead, revokeMessage, setMessagePinned, setMessageReaction } from "../modules/messages/messages.service";
 import { addOnlineUser, listOnlineUsers, removeOnlineUser, removeOnlineUserBySocket } from "../modules/sessions/online.service";
 import { redis } from "../config/redis";
 
@@ -20,6 +20,21 @@ const typingSchema = z.object({
 const readSchema = z.object({
   token: z.string().min(20),
   messageIds: z.array(z.string().min(1)).max(100)
+});
+
+const messageActionSchema = z.object({
+  token: z.string().min(20),
+  messageId: z.string().min(1)
+});
+
+const reactionSchema = messageActionSchema.extend({
+  reaction: z.enum(["like", "love", "care", "sad", "angry", "cry", "sick"]).nullable()
+});
+
+const forwardSchema = z.object({
+  token: z.string().min(20),
+  targetToken: z.string().min(20),
+  messageId: z.string().min(1)
 });
 
 const transferAdminSchema = z.object({
@@ -67,7 +82,7 @@ export function createSocketServer(httpServer: Server): SocketServer {
         await putSocketOnline(io, socket, result.token);
         socket.emit("auth:success", result);
       } catch (error) {
-        socket.emit("auth:error", { message: "Access key is invalid." });
+        socket.emit("auth:error", { message: error instanceof Error && error.message === "DIRECT_CHAT_FULL" ? "This direct chat already has 2 people." : "Access key is invalid." });
       }
     });
 
@@ -104,6 +119,11 @@ export function createSocketServer(httpServer: Server): SocketServer {
           senderName: auth.displayName,
           content: body.content,
           attachments: body.attachments,
+          replyToId: body.replyToId ?? null,
+          reactions: null,
+          pinned: false,
+          revoked: false,
+          forwardedFromId: body.forwardedFromId ?? null,
           createdAt: new Date()
         };
 
@@ -114,7 +134,9 @@ export function createSocketServer(httpServer: Server): SocketServer {
           senderId: auth.userId,
           senderName: auth.displayName,
           content: body.content,
-          attachments: body.attachments
+          attachments: body.attachments,
+          replyToId: body.replyToId,
+          forwardedFromId: body.forwardedFromId
         })
           .then((message) => {
             io.to(auth.sessionId).emit("message:stored", { tempId: realtimeMessage.id, message });
@@ -196,6 +218,63 @@ export function createSocketServer(httpServer: Server): SocketServer {
         io.to(auth.sessionId).emit("user:online-list", { sessionId: auth.sessionId, users: await listOnlineUsers(auth.sessionId) });
       } catch {
         socket.emit("admin:error", { message: "Kick failed." });
+      }
+    });
+
+    socket.on("message:react", async (payload) => {
+      try {
+        const body = reactionSchema.parse(payload);
+        const auth = await authenticateToken(body.token);
+        const message = await setMessageReaction(auth.sessionId, body.messageId, auth.userId, body.reaction);
+        if (message) io.to(auth.sessionId).emit("message:updated", { sessionId: auth.sessionId, message });
+      } catch {
+        socket.emit("message:error", { message: "Reaction failed." });
+      }
+    });
+
+    socket.on("message:pin", async (payload) => {
+      try {
+        const body = messageActionSchema.extend({ pinned: z.boolean() }).parse(payload);
+        const auth = await authenticateToken(body.token);
+        const message = await setMessagePinned(auth.sessionId, body.messageId, body.pinned);
+        if (message) io.to(auth.sessionId).emit("message:updated", { sessionId: auth.sessionId, message });
+      } catch {
+        socket.emit("message:error", { message: "Pin action failed." });
+      }
+    });
+
+    socket.on("message:revoke", async (payload) => {
+      try {
+        const body = messageActionSchema.parse(payload);
+        const auth = await authenticateToken(body.token);
+        const message = await revokeMessage(auth.sessionId, auth.userId, body.messageId);
+        if (message) io.to(auth.sessionId).emit("message:updated", { sessionId: auth.sessionId, message });
+      } catch {
+        socket.emit("message:error", { message: "Revoke failed." });
+      }
+    });
+
+    socket.on("message:forward", async (payload) => {
+      try {
+        const body = forwardSchema.parse(payload);
+        const auth = await authenticateToken(body.token);
+        const targetAuth = await authenticateToken(body.targetToken);
+        const original = await getMessage(auth.sessionId, body.messageId);
+        if (!original || original.revoked) {
+          socket.emit("message:error", { message: "Message cannot be forwarded." });
+          return;
+        }
+        const message = await createMessage({
+          sessionId: targetAuth.sessionId,
+          senderId: targetAuth.userId,
+          senderName: targetAuth.displayName,
+          content: original.content,
+          attachments: original.attachments,
+          forwardedFromId: original.id
+        });
+        io.to(targetAuth.sessionId).emit("message:new", message);
+      } catch {
+        socket.emit("message:error", { message: "Forward failed." });
       }
     });
 

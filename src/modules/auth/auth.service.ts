@@ -19,6 +19,7 @@ export type JoinResult = {
   session: {
     id: string;
     name: string;
+    kind: string;
   };
 };
 
@@ -33,7 +34,29 @@ export type AccountAuthResult = {
   rooms: JoinResult[];
 };
 
+async function getSessionKind(sessionId: string): Promise<string> {
+  const rows = await prisma.$queryRaw<Array<{ kind: string }>>`SELECT kind FROM ChatSession WHERE id = ${sessionId} LIMIT 1`;
+  return rows[0]?.kind ?? "GROUP";
+}
+
+async function getDirectDisplayName(sessionId: string, currentUserId: string, fallback: string): Promise<string> {
+  const other = await prisma.sessionUser.findFirst({
+    where: { sessionId, id: { not: currentUserId } },
+    select: { displayName: true }
+  });
+  return other?.displayName ?? fallback;
+}
+
 async function findMatchingAccessKey(rawAccessKey: string) {
+  const session = await prisma.chatSession.findUnique({
+    where: { id: rawAccessKey },
+    include: { accessKey: true }
+  });
+
+  if (session?.accessKey.active) {
+    return { ...session.accessKey, sessions: [session] };
+  }
+
   const keys = await prisma.accessKey.findMany({
     where: { active: true },
     include: { sessions: { orderBy: { createdAt: "asc" }, take: 1 } }
@@ -80,6 +103,7 @@ export async function joinChat(accessKey: string, displayNameInput: string, acco
       }
     }));
 
+  const sessionKind = await getSessionKind(session.id);
   const existingUsers = await prisma.sessionUser.count({
     where: { sessionId: session.id }
   });
@@ -88,6 +112,11 @@ export async function joinChat(accessKey: string, displayNameInput: string, acco
         where: { sessionId: session.id, accountId }
       })
     : null;
+
+  if (sessionKind === "DIRECT" && existingUsers >= 2 && !existingAccountUser) {
+    throw new Error("DIRECT_CHAT_FULL");
+  }
+
   const user =
     (existingAccountUser
       ? await prisma.sessionUser.update({
@@ -101,7 +130,7 @@ export async function joinChat(accessKey: string, displayNameInput: string, acco
         accountId,
         displayName,
         tokenId: `pending-${crypto.randomUUID()}`,
-        isAdmin: existingUsers === 0
+        isAdmin: sessionKind === "GROUP" && existingUsers === 0
       }
     }));
 
@@ -123,18 +152,21 @@ export async function joinChat(accessKey: string, displayNameInput: string, acco
     env.SESSION_TTL_SECONDS
   );
 
+  const sessionName = sessionKind === "DIRECT" ? await getDirectDisplayName(session.id, user.id, session.name) : session.name;
+
   return {
     token,
     user: {
       id: user.id,
       displayName,
       sessionId: session.id,
-      isAdmin: user.isAdmin,
-      role: user.isAdmin ? "ADMIN" : "MEMBER"
+      isAdmin: sessionKind === "GROUP" && user.isAdmin,
+      role: sessionKind === "GROUP" && user.isAdmin ? "ADMIN" : "MEMBER"
     },
     session: {
       id: session.id,
-      name: session.name
+      name: sessionName,
+      kind: sessionKind
     }
   };
 }
@@ -262,18 +294,22 @@ async function listAccountRooms(accountId: string): Promise<JoinResult[]> {
       env.SESSION_TTL_SECONDS
     );
 
+    const sessionKind = await getSessionKind(user.sessionId);
+    const sessionName = sessionKind === "DIRECT" ? await getDirectDisplayName(user.sessionId, user.id, user.session.name) : user.session.name;
+
     rooms.push({
       token,
       user: {
         id: user.id,
         displayName: user.displayName,
         sessionId: user.sessionId,
-        isAdmin: user.isAdmin,
-        role: user.isAdmin ? "ADMIN" : "MEMBER"
+        isAdmin: sessionKind === "GROUP" && user.isAdmin,
+        role: sessionKind === "GROUP" && user.isAdmin ? "ADMIN" : "MEMBER"
       },
       session: {
         id: user.session.id,
-        name: user.session.name
+        name: sessionName,
+        kind: sessionKind
       }
     });
   }
@@ -303,23 +339,27 @@ export async function resumeChat(token: string): Promise<JoinResult> {
     throw new Error("TOKEN_EXPIRED");
   }
 
+  const sessionKind = await getSessionKind(user.sessionId);
+  const sessionName = sessionKind === "DIRECT" ? await getDirectDisplayName(user.sessionId, user.id, user.session.name) : user.session.name;
+
   return {
     token,
     user: {
       id: user.id,
       displayName: user.displayName,
       sessionId: user.sessionId,
-      isAdmin: user.isAdmin,
-      role: user.isAdmin ? "ADMIN" : "MEMBER"
+      isAdmin: sessionKind === "GROUP" && user.isAdmin,
+      role: sessionKind === "GROUP" && user.isAdmin ? "ADMIN" : "MEMBER"
     },
     session: {
       id: user.session.id,
-      name: user.session.name
+      name: sessionName,
+      kind: sessionKind
     }
   };
 }
 
-export async function createAccessKey(label: string, rawAccessKey: string | undefined, sessionName?: string) {
+export async function createAccessKey(label: string, rawAccessKey: string | undefined, sessionName?: string, kind = "GROUP") {
   const accessKey = rawAccessKey ?? generateAccessKey();
   const keyHash = await bcrypt.hash(accessKey, 12);
 
@@ -337,12 +377,26 @@ export async function createAccessKey(label: string, rawAccessKey: string | unde
       id: true,
       label: true,
       active: true,
-      createdAt: true
+      createdAt: true,
+      sessions: {
+        select: {
+          id: true
+        },
+        take: 1
+      }
     }
   });
 
+  const sessionId = created.sessions[0]?.id;
+  if (sessionId) {
+    await prisma.$executeRaw`UPDATE ChatSession SET kind = ${kind} WHERE id = ${sessionId}`;
+  }
+
   return {
-    ...created,
+    id: created.id,
+    label: created.label,
+    active: created.active,
+    createdAt: created.createdAt,
     accessKey
   };
 }

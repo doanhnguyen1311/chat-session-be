@@ -13,7 +13,9 @@ export const messageSendSchema = z
   .object({
     token: z.string().min(20),
     content: z.string().trim().max(1000).default(""),
-    attachments: z.array(attachmentSchema).max(10).default([])
+    attachments: z.array(attachmentSchema).max(10).default([]),
+    replyToId: z.string().min(1).optional(),
+    forwardedFromId: z.string().min(1).optional()
   })
   .refine((value) => value.content.length > 0 || value.attachments.length > 0, {
     message: "Message cannot be empty."
@@ -21,6 +23,6 @@ export const messageSendSchema = z
 
 export const messageQuerySchema = z.object({
   token: z.string().min(20),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional()
 });

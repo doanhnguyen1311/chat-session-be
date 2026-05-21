@@ -16,6 +16,11 @@ authRouter.post("/auth/join", async (req, res, next) => {
       return;
     }
 
+    if (error instanceof Error && error.message === "DIRECT_CHAT_FULL") {
+      res.status(409).json({ message: "This direct chat already has 2 people." });
+      return;
+    }
+
     next(error);
   }
 });
@@ -74,7 +79,7 @@ authRouter.patch("/account/me", async (req, res) => {
 authRouter.post("/access-keys", async (req, res, next) => {
   try {
     const body = createAccessKeySchema.parse(req.body);
-    const accessKey = await createAccessKey(body.label, body.accessKey, body.sessionName);
+    const accessKey = await createAccessKey(body.label, body.accessKey, body.sessionName, body.kind);
     res.status(201).json({ accessKey });
   } catch (error) {
     next(error);

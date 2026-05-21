@@ -22,6 +22,7 @@ model AccessKey {
 model ChatSession {
   id          String        @id @default(cuid())
   name        String
+  kind        String        @default("GROUP")
   accessKeyId String
   accessKey   AccessKey     @relation(fields: [accessKeyId], references: [id])
   users       SessionUser[]
@@ -74,6 +75,11 @@ model Message {
   senderName  String
   content     String        @db.VarChar(1000)
   attachments Json?
+  replyToId   String?
+  reactions   Json?
+  pinned      Boolean       @default(false)
+  revoked     Boolean       @default(false)
+  forwardedFromId String?
   reads       MessageRead[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -92,4 +98,5 @@ model MessageRead {
 
   @@unique([messageId, userId])
   @@index([userId])
+  @@map("MessageRead")
 }

@@ -9,7 +9,8 @@ export const joinSchema = z.object({
 export const createAccessKeySchema = z.object({
   label: z.string().min(2).max(80),
   accessKey: z.string().min(8).max(200).optional(),
-  sessionName: z.string().min(2).max(80).optional()
+  sessionName: z.string().min(2).max(80).optional(),
+  kind: z.enum(["GROUP", "DIRECT"]).default("GROUP")
 });
 
 export const accountAuthSchema = z.object({
