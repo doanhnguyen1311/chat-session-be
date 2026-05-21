@@ -8,13 +8,23 @@ import { prisma } from "../config/prisma";
 import { authenticateToken, joinChat, resumeChat, verifyAccountToken } from "../modules/auth/auth.service";
 import { joinSchema } from "../modules/auth/auth.schemas";
 import { messageSendSchema } from "../modules/messages/messages.schemas";
-import { createMessage } from "../modules/messages/messages.service";
+import { createMessage, markMessagesRead } from "../modules/messages/messages.service";
 import { addOnlineUser, listOnlineUsers, removeOnlineUser, removeOnlineUserBySocket } from "../modules/sessions/online.service";
 import { redis } from "../config/redis";
 
 const typingSchema = z.object({
   token: z.string().min(20),
   isTyping: z.boolean()
+});
+
+const readSchema = z.object({
+  token: z.string().min(20),
+  messageIds: z.array(z.string().min(1)).max(100)
+});
+
+const transferAdminSchema = z.object({
+  token: z.string().min(20),
+  targetUserId: z.string().min(1)
 });
 
 const kickSchema = z.object({
@@ -123,6 +133,7 @@ export function createSocketServer(httpServer: Server): SocketServer {
         const body = typingSchema.parse(payload);
         const auth = await authenticateToken(body.token);
         socket.to(auth.sessionId).emit("user:typing", {
+          sessionId: auth.sessionId,
           userId: auth.userId,
           displayName: auth.displayName,
           isTyping: body.isTyping
@@ -185,6 +196,58 @@ export function createSocketServer(httpServer: Server): SocketServer {
         io.to(auth.sessionId).emit("user:online-list", { sessionId: auth.sessionId, users: await listOnlineUsers(auth.sessionId) });
       } catch {
         socket.emit("admin:error", { message: "Kick failed." });
+      }
+    });
+
+    socket.on("message:read", async (payload) => {
+      try {
+        const body = readSchema.parse(payload);
+        const auth = await authenticateToken(body.token);
+        const messages = await markMessagesRead(auth.sessionId, auth.userId, body.messageIds);
+        if (messages.length > 0) {
+          io.to(auth.sessionId).emit("message:read", {
+            sessionId: auth.sessionId,
+            userId: auth.userId,
+            displayName: auth.displayName,
+            messageIds: messages.map((message) => message.id),
+            messages
+          });
+        }
+      } catch {
+        socket.emit("message:error", { message: "Could not mark messages as read." });
+      }
+    });
+
+    socket.on("admin:transfer", async (payload) => {
+      try {
+        const body = transferAdminSchema.parse(payload);
+        const auth = await authenticateToken(body.token);
+        const admin = await prisma.sessionUser.findUnique({ where: { id: auth.userId } });
+
+        if (!admin?.isAdmin || admin.sessionId !== auth.sessionId || body.targetUserId === auth.userId) {
+          socket.emit("admin:error", { message: "You cannot transfer admin to this user." });
+          return;
+        }
+
+        const target = await prisma.sessionUser.findUnique({ where: { id: body.targetUserId } });
+        if (!target || target.sessionId !== auth.sessionId) {
+          socket.emit("admin:error", { message: "User is not in this room." });
+          return;
+        }
+
+        await prisma.$transaction([
+          prisma.sessionUser.update({ where: { id: admin.id }, data: { isAdmin: false } }),
+          prisma.sessionUser.update({ where: { id: target.id }, data: { isAdmin: true } })
+        ]);
+
+        io.to(auth.sessionId).emit("admin:transferred", {
+          sessionId: auth.sessionId,
+          previousAdminId: admin.id,
+          newAdminId: target.id
+        });
+        io.to(auth.sessionId).emit("user:online-list", { sessionId: auth.sessionId, users: await listOnlineUsers(auth.sessionId) });
+      } catch {
+        socket.emit("admin:error", { message: "Admin transfer failed." });
       }
     });
 
