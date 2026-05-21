@@ -5,15 +5,17 @@ export type OnlineUser = {
   id: string;
   displayName: string;
   avatarUrl?: string | null;
-  socketId: string;
-  joinedAt: string;
+  socketId?: string | null;
+  joinedAt?: string;
   isAdmin?: boolean;
+  isOnline?: boolean;
+  lastSeenAt?: string;
 };
 
 const onlineKey = (sessionId: string) => `session:${sessionId}:online`;
 const socketKey = (socketId: string) => `socket:${socketId}`;
 
-export async function addOnlineUser(sessionId: string, user: OnlineUser): Promise<void> {
+export async function addOnlineUser(sessionId: string, user: OnlineUser & { socketId: string; joinedAt: string }): Promise<void> {
   const existing = await redis.get(socketKey(user.socketId));
   const socketRooms = existing ? (JSON.parse(existing) as Array<{ sessionId: string; userId: string }>) : [];
   const nextRooms = socketRooms.filter((room) => room.sessionId !== sessionId);
@@ -51,7 +53,7 @@ export async function removeOnlineUserBySocket(socketId: string): Promise<Array<
 
 export async function listOnlineUsers(sessionId: string): Promise<OnlineUser[]> {
   const values = await redis.hvals(onlineKey(sessionId));
-  return values.map((value) => JSON.parse(value) as OnlineUser).sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return values.map((value) => ({ ...(JSON.parse(value) as OnlineUser), isOnline: true })).sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
 export async function removeOnlineUser(sessionId: string, userId: string): Promise<OnlineUser | null> {

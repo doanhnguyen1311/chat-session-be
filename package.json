@@ -22,6 +22,7 @@
     "db:migrate:accounts": "prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260520000200_accounts/migration.sql",
     "db:migrate:chat-account": "prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260520000300_chat_account_table/migration.sql",
     "db:migrate:profile-attachments": "prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260520000400_profile_attachments/migration.sql",
+    "db:migrate:read-receipts": "prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260520000500_read_receipts/migration.sql",
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
