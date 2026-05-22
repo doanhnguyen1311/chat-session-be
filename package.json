@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "build": "prisma generate && tsc",
+    "build": "tsc",
     "build:ts": "tsc",
     "start": "node dist/main.js",
     "pm2:start": "npm run build:ts && pm2.cmd start ecosystem.config.cjs",
