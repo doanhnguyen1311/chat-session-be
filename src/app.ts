@@ -9,6 +9,7 @@ import { authRouter } from "./modules/auth/auth.routes";
 import { messagesRouter } from "./modules/messages/messages.routes";
 import { sessionsRouter } from "./modules/sessions/sessions.routes";
 import { uploadsRouter } from "./modules/uploads/uploads.routes";
+import { roomThemeRouter } from "./modules/room-theme/room-theme.routes";
 
 export function createApp() {
   const app = express();
@@ -34,6 +35,7 @@ export function createApp() {
   app.use(messagesRouter);
   app.use(sessionsRouter);
   app.use(uploadsRouter);
+  app.use(roomThemeRouter);
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof ZodError) {

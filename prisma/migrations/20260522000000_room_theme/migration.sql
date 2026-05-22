@@ -1,0 +1,18 @@
+CREATE TABLE `RoomTheme` (
+  `roomId` VARCHAR(191) NOT NULL,
+  `themeType` VARCHAR(191) NOT NULL DEFAULT 'glass-neo',
+  `wallpaperUrl` VARCHAR(4000) NULL,
+  `blur` INTEGER NOT NULL DEFAULT 10,
+  `opacity` DOUBLE NOT NULL DEFAULT 0.6,
+  `brightness` DOUBLE NOT NULL DEFAULT 0.88,
+  `saturation` DOUBLE NOT NULL DEFAULT 1.12,
+  `overlay` VARCHAR(120) NOT NULL DEFAULT 'rgba(3, 7, 18, 0.42)',
+  `updatedBy` VARCHAR(191) NULL,
+  `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`roomId`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE INDEX `RoomTheme_updatedBy_idx` ON `RoomTheme`(`updatedBy`);
+
+ALTER TABLE `RoomTheme` ADD CONSTRAINT `RoomTheme_roomId_fkey` FOREIGN KEY (`roomId`) REFERENCES `ChatSession`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

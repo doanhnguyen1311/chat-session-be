@@ -10,6 +10,8 @@ import { joinSchema } from "../modules/auth/auth.schemas";
 import { messageSendSchema } from "../modules/messages/messages.schemas";
 import { createMessage, getMessage, markMessagesRead, revokeMessage, setMessagePinned, setMessageReaction } from "../modules/messages/messages.service";
 import { addOnlineUser, listOnlineUsers, removeOnlineUser, removeOnlineUserBySocket } from "../modules/sessions/online.service";
+import { roomThemeSchema } from "../modules/room-theme/room-theme.schemas";
+import { createThemeSystemMessage, updateRoomTheme } from "../modules/room-theme/room-theme.service";
 import { redis } from "../config/redis";
 
 const typingSchema = z.object({
@@ -229,6 +231,34 @@ export function createSocketServer(httpServer: Server): SocketServer {
         io.to(auth.sessionId).emit("user:online-list", { sessionId: auth.sessionId, users: await listOnlineUsers(auth.sessionId) });
       } catch {
         socket.emit("admin:error", { message: "Kick failed." });
+      }
+    });
+
+    socket.on("room-theme:update", async (payload) => {
+      try {
+        const body = roomThemeSchema.parse(payload);
+        const auth = await authenticateToken(body.token);
+        const theme = await updateRoomTheme({
+          roomId: auth.sessionId,
+          userId: auth.userId,
+          themeType: body.themeType,
+          wallpaperUrl: body.wallpaperUrl ?? null,
+          blur: body.blur,
+          opacity: body.opacity,
+          brightness: body.brightness,
+          saturation: body.saturation,
+          overlay: body.overlay
+        });
+        const message = await createThemeSystemMessage({
+          roomId: auth.sessionId,
+          userId: auth.userId,
+          senderName: auth.displayName,
+          content: `${auth.displayName} updated the room appearance`
+        });
+        io.to(auth.sessionId).emit("room-theme:updated", { sessionId: auth.sessionId, theme, updatedBy: { id: auth.userId, displayName: auth.displayName } });
+        io.to(auth.sessionId).emit("message:new", { ...message, replyToId: null, replyTo: null, reactions: { [auth.userId]: "system" }, pinned: false, revoked: false, forwardedFromId: null });
+      } catch {
+        socket.emit("room-theme:error", { message: "Room theme update failed." });
       }
     });
 

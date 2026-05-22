@@ -27,6 +27,7 @@ model ChatSession {
   accessKey   AccessKey     @relation(fields: [accessKeyId], references: [id])
   users       SessionUser[]
   messages    Message[]
+  theme       RoomTheme?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -86,6 +87,23 @@ model Message {
 
   @@index([sessionId, createdAt])
   @@index([senderId])
+}
+
+model RoomTheme {
+  roomId       String      @id
+  room         ChatSession @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  themeType    String      @default("glass-neo")
+  wallpaperUrl String?     @db.VarChar(4000)
+  blur         Int         @default(10)
+  opacity      Float       @default(0.6)
+  brightness   Float       @default(0.88)
+  saturation   Float       @default(1.12)
+  overlay      String      @default("rgba(3, 7, 18, 0.42)") @db.VarChar(120)
+  updatedBy    String?
+  updatedAt    DateTime    @updatedAt
+  createdAt    DateTime    @default(now())
+
+  @@index([updatedBy])
 }
 
 model MessageRead {
