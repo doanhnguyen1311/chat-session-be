@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { createAccessKey, getAccountMe, joinChat, loginAccount, registerAccount, updateAccountProfile, verifyAccountToken } from "./auth.service";
+import type { Server as SocketServer } from "socket.io";
+import { createAccessKey, getAccountMe, joinChat, loginAccount, registerAccount, searchAccounts, startDirectChat, updateAccountProfile, verifyAccountToken } from "./auth.service";
 import { accountAuthSchema, createAccessKeySchema, joinSchema, updateAccountSchema } from "./auth.schemas";
 
 export const authRouter = Router();
@@ -73,6 +74,39 @@ authRouter.patch("/account/me", async (req, res) => {
     res.json(result);
   } catch {
     res.status(401).json({ message: "Account profile could not be updated." });
+  }
+});
+
+authRouter.get("/accounts/search", async (req, res) => {
+  try {
+    const header = req.headers.authorization ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const users = await searchAccounts(token, String(req.query.q ?? ""));
+    res.json({ users });
+  } catch {
+    res.status(401).json({ message: "Account session expired." });
+  }
+});
+
+authRouter.post("/direct-chats", async (req, res) => {
+  try {
+    const header = req.headers.authorization ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const targetAccountId = String(req.body.targetAccountId ?? "");
+    const result = await startDirectChat(token, targetAccountId);
+    const io = req.app.get("io") as SocketServer | undefined;
+    io?.to(`account:${result.targetAccountId}`).emit("direct-chat:created", result.targetRoom);
+    res.status(201).json(result.initiatorRoom);
+  } catch (error) {
+    if (error instanceof Error && error.message === "ACCOUNT_NOT_FOUND") {
+      res.status(404).json({ message: "Account not found." });
+      return;
+    }
+    if (error instanceof Error && error.message === "DIRECT_SELF") {
+      res.status(400).json({ message: "You cannot start a direct chat with yourself." });
+      return;
+    }
+    res.status(401).json({ message: "Could not start direct chat." });
   }
 });
 

@@ -8,7 +8,8 @@ import { createSocketServer } from "./socket";
 async function bootstrap(): Promise<void> {
   const app = createApp();
   const server = http.createServer(app);
-  createSocketServer(server);
+  const io = createSocketServer(server);
+  app.set("io", io);
 
   server.listen(env.PORT, () => {
     console.log(`Backend listening on http://localhost:${env.PORT}`);

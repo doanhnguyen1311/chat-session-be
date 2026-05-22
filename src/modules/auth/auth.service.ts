@@ -34,6 +34,13 @@ export type AccountAuthResult = {
   rooms: JoinResult[];
 };
 
+export type AccountSearchResult = {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+};
+
 async function getSessionKind(sessionId: string): Promise<string> {
   const rows = await prisma.$queryRaw<Array<{ kind: string }>>`SELECT kind FROM ChatSession WHERE id = ${sessionId} LIMIT 1`;
   return rows[0]?.kind ?? "GROUP";
@@ -242,6 +249,30 @@ export async function getAccountMe(accountToken: string): Promise<AccountAuthRes
   };
 }
 
+export async function searchAccounts(accountToken: string, queryInput: string): Promise<AccountSearchResult[]> {
+  const payload = verifyAccountToken(accountToken);
+  const query = queryInput.trim();
+  if (query.length < 2) return [];
+
+  return prisma.account.findMany({
+    where: {
+      id: { not: payload.accountId },
+      OR: [
+        { username: { contains: query } },
+        { displayName: { contains: query } }
+      ]
+    },
+    select: {
+      id: true,
+      username: true,
+      displayName: true,
+      avatarUrl: true
+    },
+    orderBy: [{ displayName: "asc" }, { username: "asc" }],
+    take: 10
+  });
+}
+
 export async function updateAccountProfile(
   accountToken: string,
   params: { displayName?: string; avatarUrl?: string }
@@ -269,6 +300,69 @@ export async function updateAccountProfile(
     account: { id: account.id, username: account.username, displayName: account.displayName, avatarUrl: account.avatarUrl },
     rooms: await listAccountRooms(account.id)
   };
+}
+
+export async function startDirectChat(accountToken: string, targetAccountId: string): Promise<{ initiatorRoom: JoinResult; targetRoom: JoinResult; targetAccountId: string }> {
+  const payload = verifyAccountToken(accountToken);
+  if (payload.accountId === targetAccountId) {
+    throw new Error("DIRECT_SELF");
+  }
+
+  const [currentAccount, targetAccount] = await Promise.all([
+    prisma.account.findUnique({ where: { id: payload.accountId } }),
+    prisma.account.findUnique({ where: { id: targetAccountId } })
+  ]);
+
+  if (!currentAccount || !targetAccount) {
+    throw new Error("ACCOUNT_NOT_FOUND");
+  }
+
+  const existingSessions = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT s.id
+    FROM ChatSession s
+    INNER JOIN SessionUser currentUser ON currentUser.sessionId = s.id AND currentUser.accountId = ${currentAccount.id}
+    INNER JOIN SessionUser targetUser ON targetUser.sessionId = s.id AND targetUser.accountId = ${targetAccount.id}
+    WHERE s.kind = 'DIRECT'
+    LIMIT 1
+  `;
+
+  const sessionId = existingSessions[0]?.id ?? await createDirectSession(currentAccount, targetAccount);
+  const [initiatorRoom, targetRoom] = await Promise.all([
+    joinChat(sessionId, currentAccount.displayName, currentAccount.id),
+    joinChat(sessionId, targetAccount.displayName, targetAccount.id)
+  ]);
+
+  return { initiatorRoom, targetRoom, targetAccountId: targetAccount.id };
+}
+
+async function createDirectSession(
+  currentAccount: { id: string; displayName: string },
+  targetAccount: { id: string; displayName: string }
+): Promise<string> {
+  const accessKey = await prisma.accessKey.create({
+    data: {
+      label: `${currentAccount.displayName} & ${targetAccount.displayName}`,
+      keyHash: await bcrypt.hash(generateAccessKey(), 12)
+    }
+  });
+
+  const session = await prisma.chatSession.create({
+    data: {
+      name: `${currentAccount.displayName} & ${targetAccount.displayName}`,
+      accessKeyId: accessKey.id,
+      users: {
+        create: {
+          accountId: targetAccount.id,
+          displayName: normalizeDisplayName(targetAccount.displayName),
+          tokenId: `pending-${crypto.randomUUID()}`,
+          isAdmin: false
+        }
+      }
+    }
+  });
+
+  await prisma.$executeRaw`UPDATE ChatSession SET kind = 'DIRECT' WHERE id = ${session.id}`;
+  return session.id;
 }
 
 async function listAccountRooms(accountId: string): Promise<JoinResult[]> {

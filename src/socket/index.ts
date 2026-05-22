@@ -74,6 +74,17 @@ export function createSocketServer(httpServer: Server): SocketServer {
   });
 
   io.on("connection", (socket) => {
+    const accountToken = socket.handshake.auth.accountToken;
+    if (typeof accountToken === "string" && accountToken.length > 0) {
+      try {
+        const account = verifyAccountToken(accountToken);
+        void socket.join(`account:${account.accountId}`);
+      } catch {
+        socket.disconnect(true);
+        return;
+      }
+    }
+
     socket.on("auth:join", async (payload) => {
       try {
         const body = joinSchema.parse(payload);
